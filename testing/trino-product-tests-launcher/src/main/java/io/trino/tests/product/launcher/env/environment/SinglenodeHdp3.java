@@ -15,6 +15,7 @@ package io.trino.tests.product.launcher.env.environment;
 
 import com.google.common.collect.ImmutableList;
 import io.trino.tests.product.launcher.docker.DockerFiles;
+import io.trino.tests.product.launcher.docker.DockerFiles.ResourceProvider;
 import io.trino.tests.product.launcher.env.Environment;
 import io.trino.tests.product.launcher.env.EnvironmentConfig;
 import io.trino.tests.product.launcher.env.EnvironmentProvider;
@@ -25,9 +26,8 @@ import io.trino.tests.product.launcher.env.common.TestsEnvironment;
 import javax.inject.Inject;
 
 import static io.trino.tests.product.launcher.env.EnvironmentContainers.HADOOP;
-import static io.trino.tests.product.launcher.env.EnvironmentContainers.TESTS;
+import static io.trino.tests.product.launcher.env.EnvironmentContainers.configureTempto;
 import static io.trino.tests.product.launcher.env.common.Hadoop.CONTAINER_HADOOP_INIT_D;
-import static io.trino.tests.product.launcher.env.common.Standard.CONTAINER_TEMPTO_PROFILE_CONFIG;
 import static java.util.Objects.requireNonNull;
 import static org.testcontainers.utility.MountableFile.forHostPath;
 
@@ -37,14 +37,15 @@ import static org.testcontainers.utility.MountableFile.forHostPath;
 public class SinglenodeHdp3
         extends EnvironmentProvider
 {
-    private final DockerFiles dockerFiles;
+    private final ResourceProvider configDir;
     private final String hadoopImagesVersion;
 
     @Inject
     protected SinglenodeHdp3(DockerFiles dockerFiles, Standard standard, Hadoop hadoop, EnvironmentConfig environmentConfig)
     {
         super(ImmutableList.of(standard, hadoop));
-        this.dockerFiles = requireNonNull(dockerFiles, "dockerFiles is null");
+        this.configDir = requireNonNull(dockerFiles, "dockerFiles is null")
+                .getDockerFilesHostDirectory("conf/environment/singlenode-hdp3");
         this.hadoopImagesVersion = requireNonNull(environmentConfig, "environmentConfig is null").getHadoopImagesVersion();
     }
 
@@ -56,14 +57,10 @@ public class SinglenodeHdp3
         builder.configureContainer(HADOOP, dockerContainer -> {
             dockerContainer.setDockerImageName(dockerImageName);
             dockerContainer.withCopyFileToContainer(
-                    forHostPath(dockerFiles.getDockerFilesHostPath("conf/environment/singlenode-hdp3/apply-hdp3-config.sh")),
+                    forHostPath(configDir.getPath("apply-hdp3-config.sh")),
                     CONTAINER_HADOOP_INIT_D + "apply-hdp3-config.sh");
         });
 
-        builder.configureContainer(TESTS, dockerContainer -> {
-            dockerContainer.withCopyFileToContainer(
-                    forHostPath(dockerFiles.getDockerFilesHostPath("conf/tempto/tempto-configuration-for-hive3.yaml")),
-                    CONTAINER_TEMPTO_PROFILE_CONFIG);
-        });
+        configureTempto(builder, configDir, "hive3");
     }
 }

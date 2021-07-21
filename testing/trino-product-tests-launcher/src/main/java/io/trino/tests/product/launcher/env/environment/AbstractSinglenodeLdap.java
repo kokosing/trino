@@ -14,6 +14,7 @@
 package io.trino.tests.product.launcher.env.environment;
 
 import io.trino.tests.product.launcher.docker.DockerFiles;
+import io.trino.tests.product.launcher.docker.DockerFiles.ResourceProvider;
 import io.trino.tests.product.launcher.env.DockerContainer;
 import io.trino.tests.product.launcher.env.Environment;
 import io.trino.tests.product.launcher.env.EnvironmentConfig;
@@ -29,9 +30,9 @@ import static io.trino.tests.product.launcher.docker.ContainerUtil.forSelectedPo
 import static io.trino.tests.product.launcher.env.EnvironmentContainers.COORDINATOR;
 import static io.trino.tests.product.launcher.env.EnvironmentContainers.LDAP;
 import static io.trino.tests.product.launcher.env.EnvironmentContainers.TESTS;
+import static io.trino.tests.product.launcher.env.EnvironmentContainers.configureTempto;
 import static io.trino.tests.product.launcher.env.common.Standard.CONTAINER_PRESTO_CONFIG_PROPERTIES;
 import static io.trino.tests.product.launcher.env.common.Standard.CONTAINER_PRESTO_ETC;
-import static io.trino.tests.product.launcher.env.common.Standard.CONTAINER_TEMPTO_PROFILE_CONFIG;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
 import static org.testcontainers.utility.MountableFile.forHostPath;
@@ -40,6 +41,7 @@ public abstract class AbstractSinglenodeLdap
         extends EnvironmentProvider
 {
     protected final DockerFiles dockerFiles;
+    protected final ResourceProvider configDir;
     private final PortBinder portBinder;
     private final String imagesVersion;
 
@@ -49,6 +51,7 @@ public abstract class AbstractSinglenodeLdap
     {
         super(bases);
         this.dockerFiles = requireNonNull(dockerFiles, "dockerFiles is null");
+        this.configDir = dockerFiles.getDockerFilesHostDirectory("conf/environment/singlenode-ldap");
         this.portBinder = requireNonNull(portBinder, "portBinder is null");
         this.imagesVersion = requireNonNull(environmentConfig, "environmentConfig is null").getImagesVersion();
     }
@@ -66,7 +69,7 @@ public abstract class AbstractSinglenodeLdap
                     CONTAINER_PRESTO_ETC + "/password-authenticator.properties");
 
             dockerContainer.withCopyFileToContainer(
-                    forHostPath(dockerFiles.getDockerFilesHostPath("conf/environment/singlenode-ldap/config.properties")),
+                    forHostPath(configDir.getPath("config.properties")),
                     CONTAINER_PRESTO_CONFIG_PROPERTIES);
 
             portBinder.exposePort(dockerContainer, 8443);
@@ -74,10 +77,8 @@ public abstract class AbstractSinglenodeLdap
 
         builder.configureContainer(TESTS, dockerContainer -> {
             dockerContainer.setDockerImageName(baseImage);
-            dockerContainer.withCopyFileToContainer(
-                    forHostPath(dockerFiles.getDockerFilesHostPath("conf/tempto/tempto-configuration-for-docker-ldap.yaml")),
-                    CONTAINER_TEMPTO_PROFILE_CONFIG);
         });
+        configureTempto(builder, configDir, "singlenode-ldap");
 
         DockerContainer container = new DockerContainer(baseImage, LDAP)
                 .withStartupCheckStrategy(new IsRunningStartupCheckStrategy())
