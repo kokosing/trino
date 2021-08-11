@@ -385,8 +385,7 @@ public class LogicalPlanner
             TableHandle tableHandle,
             List<ColumnHandle> insertColumns,
             Optional<NewTableLayout> newTableLayout,
-            boolean isMaterializedViewRefresh,
-            WriterTarget writerTarget)
+            Optional<WriterTarget> materializedViewRefreshWriterTarget)
     {
         TableMetadata tableMetadata = metadata.getTableMetadata(session, tableHandle);
 
@@ -444,12 +443,12 @@ public class LogicalPlanner
         String catalogName = tableHandle.getCatalogName().getCatalogName();
         TableStatisticsMetadata statisticsMetadata = metadata.getStatisticsCollectionMetadataForWrite(session, catalogName, tableMetadata.getMetadata());
 
-        if (isMaterializedViewRefresh) {
+        if (materializedViewRefreshWriterTarget.isPresent()) {
             return createTableWriterPlan(
                     analysis,
                     plan.getRoot(),
                     plan.getFieldMappings(),
-                    requireNonNull(writerTarget, "writerTarget for materialized view refresh is null"),
+                    materializedViewRefreshWriterTarget.get(),
                     insertedTableColumnNames,
                     insertedColumns,
                     newTableLayout,
@@ -477,7 +476,7 @@ public class LogicalPlanner
         TableHandle tableHandle = insert.getTarget();
         Query query = insertStatement.getQuery();
         Optional<NewTableLayout> newTableLayout = insert.getNewTableLayout();
-        return getInsertPlan(analysis, query, tableHandle, insert.getColumns(), newTableLayout, false, null);
+        return getInsertPlan(analysis, query, tableHandle, insert.getColumns(), newTableLayout, Optional.empty());
     }
 
     private RelationPlan createRefreshMaterializedViewPlan(Analysis analysis)
@@ -498,7 +497,7 @@ public class LogicalPlanner
         Optional<NewTableLayout> newTableLayout = metadata.getInsertLayout(session, viewAnalysis.getTarget());
         TableWriterNode.RefreshMaterializedViewReference writerTarget = new TableWriterNode.RefreshMaterializedViewReference(viewAnalysis.getMaterializedViewName(),
                 tableHandle, new ArrayList<>(analysis.getTables()));
-        return getInsertPlan(analysis, query, tableHandle, viewAnalysis.getColumns(), newTableLayout, true, writerTarget);
+        return getInsertPlan(analysis, query, tableHandle, viewAnalysis.getColumns(), newTableLayout, Optional.of(writerTarget));
     }
 
     private RelationPlan createTableWriterPlan(
