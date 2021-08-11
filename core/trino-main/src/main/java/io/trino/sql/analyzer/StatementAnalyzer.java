@@ -677,8 +677,8 @@ class StatementAnalyzer
                 throw semanticException(NOT_SUPPORTED, node, "Delete from table with row filter");
             }
 
-            TableMetadata tableMetadata = metadata.getTableMetadata(session, handle);
-            for (ColumnMetadata tableColumn : tableMetadata.getColumns()) {
+            TableSchema tableSchema = metadata.getTableSchema(session, handle);
+            for (ColumnSchema tableColumn : tableSchema.getColumns()) {
                 if (!accessControl.getColumnMasks(session.toSecurityContext(), tableName, tableColumn.getName(), tableColumn.getType()).isEmpty()) {
                     throw semanticException(NOT_SUPPORTED, node, "Delete from table with column mask");
                 }
