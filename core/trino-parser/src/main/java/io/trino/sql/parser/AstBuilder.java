@@ -438,8 +438,9 @@ class AstBuilder
     @Override
     public Node visitRefreshMaterializedView(SqlBaseParser.RefreshMaterializedViewContext context)
     {
-        return new RefreshMaterializedView(Optional.of(getLocation(context)),
-                getQualifiedName(context.qualifiedName()));
+        return new RefreshMaterializedView(
+                Optional.of(getLocation(context)),
+                new Table(getQualifiedName(context.qualifiedName())));
     }
 
     @Override
@@ -476,7 +477,7 @@ class AstBuilder
         }
 
         return new Insert(
-                getQualifiedName(context.qualifiedName()),
+                new Table(getQualifiedName(context.qualifiedName())),
                 columnAliases,
                 (Query) visit(context.query()));
     }
