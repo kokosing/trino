@@ -33,6 +33,8 @@ import org.testng.annotations.Test;
 
 import java.util.Optional;
 
+import static io.trino.connector.MockConnectorEntities.TPCH_NATION_DATA;
+import static io.trino.connector.MockConnectorEntities.TPCH_NATION_SCHEMA;
 import static io.trino.plugin.tpch.TpchMetadata.TINY_SCHEMA_NAME;
 import static io.trino.testing.TestingSession.testSessionBuilder;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -76,6 +78,18 @@ public class TestRowFilter
                 .withGetViews((s, prefix) -> ImmutableMap.<SchemaTableName, ConnectorViewDefinition>builder()
                         .put(new SchemaTableName("default", "nation_view"), view)
                         .build())
+                .withGetColumns(schemaTableName -> {
+                    if (schemaTableName.equals(new SchemaTableName("tiny", "nation"))) {
+                        return TPCH_NATION_SCHEMA;
+                    }
+                    throw new UnsupportedOperationException();
+                })
+                .withData(schemaTableName -> {
+                    if (schemaTableName.equals(new SchemaTableName("tiny", "nation"))) {
+                        return TPCH_NATION_DATA;
+                    }
+                    throw new UnsupportedOperationException();
+                })
                 .build();
 
         runner.createCatalog(MOCK_CATALOG, mock, ImmutableMap.of());
@@ -379,15 +393,28 @@ public class TestRowFilter
     {
         accessControl.reset();
         accessControl.rowFilter(
-                new QualifiedObjectName(CATALOG, "tiny", "orders"),
+                new QualifiedObjectName(MOCK_CATALOG, "tiny", "nation"),
                 USER,
-                new ViewExpression(USER, Optional.empty(), Optional.empty(), "orderkey < 10"));
-        assertThatThrownBy(() -> assertions.query("DELETE FROM orders"))
-                .hasMessage("line 1:1: Delete from table with row filter");
-        assertThatThrownBy(() -> assertions.query("DELETE FROM orders WHERE orderkey IN (1, 2, 3)"))
-                .hasMessage("line 1:1: Delete from table with row filter");
-        assertThatThrownBy(() -> assertions.query("DELETE FROM orders WHERE orderkey IN (10, 20, 30)"))
-                .hasMessage("line 1:1: Delete from table with row filter");
+                new ViewExpression(USER, Optional.empty(), Optional.empty(), "nationkey < 10"));
+
+        // Within allowed row filter
+        assertions.query("DELETE FROM mock.tiny.nation WHERE nationkey < 3")
+                .assertThat()
+                .matches("SELECT BIGINT '3'");
+        assertions.query("DELETE FROM mock.tiny.nation WHERE nationkey IN (1, 2, 3)")
+                .assertThat()
+                .matches("SELECT BIGINT '3'");
+
+        // Outside allowed row filter, only readable rows were dropped
+        assertions.query("DELETE FROM mock.tiny.nation")
+                .assertThat()
+                .matches("SELECT BIGINT '10'");
+        assertions.query("DELETE FROM mock.tiny.nation WHERE nationkey IN (1, 11)")
+                .assertThat()
+                .matches("SELECT BIGINT '1'");
+        assertions.query("DELETE FROM mock.tiny.nation WHERE nationkey >= 10")
+                .assertThat()
+                .matches("SELECT BIGINT '0'");
     }
 
     @Test
@@ -395,15 +422,32 @@ public class TestRowFilter
     {
         accessControl.reset();
         accessControl.rowFilter(
-                new QualifiedObjectName(CATALOG, "tiny", "orders"),
+                new QualifiedObjectName(MOCK_CATALOG, "tiny", "nation"),
                 USER,
-                new ViewExpression(USER, Optional.empty(), Optional.empty(), "orderkey < 10"));
-        assertThatThrownBy(() -> assertions.query("UPDATE orders SET totalprice = totalprice * 2"))
-                .hasMessage("line 1:1: Updating a table with a row filter is not supported");
-        assertThatThrownBy(() -> assertions.query("UPDATE orders SET totalprice = totalprice * 2 WHERE orderkey IN (1, 2, 3)"))
-                .hasMessage("line 1:1: Updating a table with a row filter is not supported");
-        assertThatThrownBy(() -> assertions.query("UPDATE orders SET totalprice = totalprice * 2 WHERE orderkey IN (10, 20, 30)"))
-                .hasMessage("line 1:1: Updating a table with a row filter is not supported");
+                new ViewExpression(USER, Optional.empty(), Optional.empty(), "nationkey < 10"));
+
+        // Within allowed row filter
+        assertions.query("UPDATE mock.tiny.nation SET regionkey = regionkey * 2 WHERE nationkey < 3")
+                .assertThat()
+                .matches("SELECT BIGINT '3'");
+        assertions.query("UPDATE mock.tiny.nation SET regionkey = regionkey * 2 WHERE nationkey IN (1, 2, 3)")
+                .assertThat()
+                .matches("SELECT BIGINT '3'");
+
+        // Outside allowed row filter, only readable rows were dropped
+        assertions.query("UPDATE mock.tiny.nation SET regionkey = regionkey * 2")
+                .assertThat()
+                .matches("SELECT BIGINT '10'");
+        assertions.query("UPDATE mock.tiny.nation SET regionkey = regionkey * 2 WHERE nationkey IN (1, 11)")
+                .assertThat()
+                .matches("SELECT BIGINT '1'");
+
+        assertThatThrownBy(() ->
+                assertions.query("UPDATE mock.tiny.nation SET regionkey = regionkey * 2 WHERE nationkey = 11")
+                        .assertThat()
+                        .matches("SELECT BIGINT '0'"))
+                // TODO https://github.com/trinodb/trino/issues/8855 - UPDATE with WHERE false currently is not supported
+                .hasMessage("Invalid descendant for DeleteNode or UpdateNode: io.trino.sql.planner.plan.ExchangeNode");
     }
 
     @Test
@@ -411,10 +455,24 @@ public class TestRowFilter
     {
         accessControl.reset();
         accessControl.rowFilter(
-                new QualifiedObjectName(CATALOG, "tiny", "nation"),
+                new QualifiedObjectName(MOCK_CATALOG, "tiny", "nation"),
                 USER,
-                new ViewExpression(USER, Optional.empty(), Optional.empty(), "nationkey < 10"));
-        assertThatThrownBy(() -> assertions.query("INSERT INTO nation VALUES (26, 'POLAND', 0, 'No comment')"))
-                .hasMessage("Insert into table with a row filter is not supported");
+                new ViewExpression(USER, Optional.empty(), Optional.empty(), "nationkey > 100"));
+
+        // Within allowed row filter
+        assertions.query("INSERT INTO mock.tiny.nation VALUES (101, 'POLAND', 0, 'No comment')")
+                .assertThat()
+                .skippingTypesCheck()
+                .matches("SELECT BIGINT '1'");
+
+        // Outside allowed row filter
+        assertThatThrownBy(() -> assertions.query("INSERT INTO mock.tiny.nation VALUES (26, 'POLAND', 0, 'No comment')"))
+                .hasMessage("Access Denied: Cannot insert into a table restricted with a row filter");
+
+        // Outside allowed row filter
+        assertThatThrownBy(() -> assertions.query("INSERT INTO mock.tiny.nation VALUES "
+                + "(26, 'POLAND', 0, 'No comment'),"
+                + "(27, 'HOLLAND', 0, 'A comment')"))
+                .hasMessage("Access Denied: Cannot insert into a table restricted with a row filter");
     }
 }

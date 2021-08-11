@@ -472,8 +472,8 @@ class QueryPlanner
         TableHandle handle = analysis.getTableHandle(table);
 
         // create table scan
-        RelationPlan relationPlan = new RelationPlanner(analysis, symbolAllocator, idAllocator, lambdaDeclarationToSymbolMap, metadata, outerContext, session, recursiveSubqueries)
-                .process(table, null);
+        RelationPlanner relationPlanner = new RelationPlanner(analysis, symbolAllocator, idAllocator, lambdaDeclarationToSymbolMap, metadata, outerContext, session, recursiveSubqueries);
+        RelationPlan relationPlan = relationPlanner.process(table, null);
 
         PlanBuilder builder = newPlanBuilder(relationPlan, analysis, lambdaDeclarationToSymbolMap);
         if (node.getWhere().isPresent()) {

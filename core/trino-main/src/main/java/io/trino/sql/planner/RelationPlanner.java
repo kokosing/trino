@@ -249,6 +249,11 @@ class RelationPlanner
 
     private RelationPlan addRowFilters(Table node, RelationPlan plan)
     {
+        return addRowFilters(node, plan, Function.identity());
+    }
+
+    public RelationPlan addRowFilters(Table node, RelationPlan plan, Function<Expression, Expression> predicateTransformation)
+    {
         List<Expression> filters = analysis.getRowFilters(node);
 
         if (filters.isEmpty()) {
@@ -261,10 +266,12 @@ class RelationPlanner
         for (Expression filter : filters) {
             planBuilder = subqueryPlanner.handleSubqueries(planBuilder, filter, analysis.getSubqueries(filter));
 
+            Expression predicate = planBuilder.rewrite(filter);
+            predicate = predicateTransformation.apply(predicate);
             planBuilder = planBuilder.withNewRoot(new FilterNode(
                     idAllocator.getNextId(),
                     planBuilder.getRoot(),
-                    planBuilder.rewrite(filter)));
+                    predicate));
         }
 
         return new RelationPlan(planBuilder.getRoot(), plan.getScope(), plan.getFieldMappings(), outerContext);

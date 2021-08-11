@@ -425,10 +425,6 @@ class StatementAnalyzer
             }
             accessControl.checkCanInsertIntoTable(session.toSecurityContext(), targetTable);
 
-            if (!accessControl.getRowFilters(session.toSecurityContext(), targetTable).isEmpty()) {
-                throw semanticException(NOT_SUPPORTED, insert, "Insert into table with a row filter is not supported");
-            }
-
             TableSchema tableSchema = metadata.getTableSchema(session, targetTableHandle.get());
 
             List<ColumnSchema> columns = tableSchema.getColumns().stream()
@@ -440,6 +436,10 @@ class StatementAnalyzer
                     throw semanticException(NOT_SUPPORTED, insert, "Insert into table with column masks is not supported");
                 }
             }
+
+            Map<String, ColumnHandle> columnHandles = metadata.getColumnHandles(session, targetTableHandle.get());
+            List<Field> tableFields = analyzeTableOutputFields(insert.getTable(), targetTable, tableSchema, columnHandles);
+            analyzeFiltersAndMasks(insert.getTable(), targetTable, targetTableHandle, tableFields, session.getIdentity().getUser());
 
             List<String> tableColumns = columns.stream()
                     .map(ColumnSchema::getName)
@@ -474,8 +474,8 @@ class StatementAnalyzer
                 insertColumns = tableColumns;
             }
 
-            Map<String, ColumnHandle> columnHandles = metadata.getColumnHandles(session, targetTableHandle.get());
             analysis.setInsert(new Analysis.Insert(
+                    insert.getTable(),
                     targetTableHandle.get(),
                     insertColumns.stream().map(columnHandles::get).collect(toImmutableList()),
                     newTableLayout));
@@ -566,7 +566,7 @@ class StatementAnalyzer
 
             Map<String, ColumnHandle> columnHandles = metadata.getColumnHandles(session, targetTableHandle.get());
             analysis.setRefreshMaterializedView(new Analysis.RefreshMaterializedViewAnalysis(
-                    name,
+                    refreshMaterializedView.getTable(),
                     targetTableHandle.get(), query,
                     insertColumns.stream().map(columnHandles::get).collect(toImmutableList())));
 
@@ -673,10 +673,6 @@ class StatementAnalyzer
 
             accessControl.checkCanDeleteFromTable(session.toSecurityContext(), tableName);
 
-            if (!accessControl.getRowFilters(session.toSecurityContext(), tableName).isEmpty()) {
-                throw semanticException(NOT_SUPPORTED, node, "Delete from table with row filter");
-            }
-
             TableSchema tableSchema = metadata.getTableSchema(session, handle);
             for (ColumnSchema tableColumn : tableSchema.getColumns()) {
                 if (!accessControl.getColumnMasks(session.toSecurityContext(), tableName, tableColumn.getName(), tableColumn.getType()).isEmpty()) {
@@ -698,6 +694,8 @@ class StatementAnalyzer
 
             Scope tableScope = analyzer.analyzeForUpdate(table, scope, UpdateKind.DELETE);
             node.getWhere().ifPresent(where -> analyzeWhere(node, tableScope, where));
+
+            analyzeFiltersAndMasks(table, tableName, Optional.of(handle), analysis.getScope(table).getRelationType(), session.getIdentity().getUser());
 
             analysis.setUpdateType("DELETE", tableName, Optional.of(table), Optional.empty());
 
@@ -1403,11 +1401,17 @@ class StatementAnalyzer
 
         private void analyzeFiltersAndMasks(Table table, QualifiedObjectName name, Optional<TableHandle> tableHandle, List<Field> fields, String authorization)
         {
+            analyzeFiltersAndMasks(table, name, tableHandle, new RelationType(fields), authorization);
+        }
+
+        private void analyzeFiltersAndMasks(Table table, QualifiedObjectName name, Optional<TableHandle> tableHandle, RelationType relationType, String authorization)
+        {
             Scope accessControlScope = Scope.builder()
-                    .withRelationType(RelationId.anonymous(), new RelationType(fields))
+                    .withRelationType(RelationId.anonymous(), relationType)
                     .build();
 
-            for (Field field : fields) {
+            for (int index = 0; index < relationType.getAllFieldCount(); index++) {
+                Field field = relationType.getFieldByIndex(index);
                 if (field.getName().isPresent()) {
                     List<ViewExpression> masks = accessControl.getColumnMasks(session.toSecurityContext(), name, field.getName().get(), field.getType());
 
@@ -2248,10 +2252,6 @@ class StatementAnalyzer
                     .collect(toImmutableSet());
             accessControl.checkCanUpdateTableColumns(session.toSecurityContext(), tableName, assignmentTargets);
 
-            if (!accessControl.getRowFilters(session.toSecurityContext(), tableName).isEmpty()) {
-                throw semanticException(NOT_SUPPORTED, update, "Updating a table with a row filter is not supported");
-            }
-
             // TODO: how to deal with connectors that need to see the pre-image of rows to perform the update without
             //       flowing that data through the masking logic
             for (ColumnMetadata tableColumn : allColumns) {
@@ -2278,6 +2278,8 @@ class StatementAnalyzer
 
             Scope tableScope = analyzer.analyzeForUpdate(table, scope, UpdateKind.UPDATE);
             update.getWhere().ifPresent(where -> analyzeWhere(update, tableScope, where));
+
+            analyzeFiltersAndMasks(table, tableName, Optional.of(handle), analysis.getScope(table).getRelationType(), session.getIdentity().getUser());
 
             ImmutableList.Builder<ExpressionAnalysis> analysesBuilder = ImmutableList.builder();
             ImmutableList.Builder<Type> expressionTypesBuilder = ImmutableList.builder();
